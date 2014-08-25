@@ -10,6 +10,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -17,6 +18,7 @@ import javax.swing.JTable;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.EtchedBorder;
 import javax.swing.table.AbstractTableModel;
+
 import Data.Employee;
 import Data.Shift;
 import Data.TimeController;
@@ -28,14 +30,18 @@ public class EmployeePanel extends JPanel implements ActionListener {
 	protected Employee currentEmployee;
 	protected EmployeeTableModel tableModel;
 	
-	protected String[]  tableColumnNames = {"","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"};
+	protected final String[] columnRef  = {"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
+	protected String[]  tableColumnNames = {"-","","","","","","",""};
 	protected Object[][] tableData;
+	protected Calendar firstDay;
+	protected int startingDay;
 	protected final int tableRows = 7;
 	protected final int tableColumns = 8;
 	
 	protected JButton bTimeIn;
 	protected JButton bTimeOut;
 	protected JTable employeeTable;
+	protected JLabel totalHoursLabel;
 	
 	protected JPanel timeInControls;
 	
@@ -46,6 +52,9 @@ public class EmployeePanel extends JPanel implements ActionListener {
 		timeMan = t;
 		
 		tableModel = new EmployeeTableModel();
+		firstDay = null;
+		startingDay = 3;
+			setStartingDay(startingDay);
 		
 		timeInControls = new JPanel();
 			timeInControls.setLayout(new BoxLayout(timeInControls, BoxLayout.LINE_AXIS));
@@ -57,10 +66,14 @@ public class EmployeePanel extends JPanel implements ActionListener {
 		bTimeOut = new JButton("Time Out");
 			bTimeOut.setActionCommand("timeOut");
 			bTimeOut.addActionListener(this);		
-		
+
+		totalHoursLabel = new JLabel("Time worked this week: ");
+			
 		timeInControls.add(bTimeIn);
 			timeInControls.add(Box.createRigidArea(new Dimension(20,0)));
 			timeInControls.add(bTimeOut);
+			timeInControls.add(Box.createRigidArea(new Dimension(20,0)));
+			timeInControls.add(totalHoursLabel);
 			
 		tableData = new Object[tableRows][tableColumns];
 		employeeTable = new JTable(tableData, tableColumnNames);
@@ -70,11 +83,20 @@ public class EmployeePanel extends JPanel implements ActionListener {
 		JScrollPane scrollPane = new JScrollPane(employeeTable);
 			scrollPane.setMaximumSize(new Dimension(1000,500));
 			scrollPane.setBorder(BorderFactory.createCompoundBorder(new EmptyBorder(10, 10, 10, 10),  new EtchedBorder()));
-		
 			
-		add(timeInControls);
+		add(timeInControls);		
 		//add(employeeTable.getTableHeader());
 		add(scrollPane);
+		
+	}
+	
+	//Requires a new loadEmployee to apply the changes to tableData
+	public void setStartingDay(int newDay)
+	{
+		for(int x = 0; x < 7; x++)
+		{
+			tableColumnNames[x+1] = columnRef[(newDay+x)%7];
+		}
 	}
 	
 	public void clearTableData()
@@ -87,10 +109,24 @@ public class EmployeePanel extends JPanel implements ActionListener {
 	public void loadEmployee(Employee e)
 	{
 		clearTableData();
+		currentEmployee = e;
 		
 		GregorianCalendar from = new GregorianCalendar();
-			from.add(Calendar.DAY_OF_MONTH, -7);
+		if(from.get(Calendar.DAY_OF_WEEK) != startingDay+1)
+			from.add(Calendar.DAY_OF_MONTH, -7 + from.get(Calendar.DAY_OF_WEEK)-1+startingDay);
 		GregorianCalendar to = new GregorianCalendar();
+		firstDay = from;
+		
+		for(int c = 0; c < 7; c++)
+		{
+			employeeTable.getTableHeader().getColumnModel().getColumn(c+1).setHeaderValue(""+
+					from.get(Calendar.MONTH)+"/"+
+					(from.get(Calendar.DAY_OF_MONTH)+c)+"/"+
+					from.get(Calendar.YEAR)+" - "+
+					tableColumnNames[c+1]);
+		}
+		
+		
 		
 		for(int r = 0; r < tableRows-2; r+=2)
 		{
@@ -127,7 +163,7 @@ public class EmployeePanel extends JPanel implements ActionListener {
 				row++;
 			}
 			tableModel.setValueAt("" + s.getStartTime().get(Calendar.HOUR_OF_DAY) + ":" + s.getStartTime().get(Calendar.MINUTE),row,col);
-			tableModel.setValueAt("" + s.getEndTime().get(Calendar.HOUR_OF_DAY) + ":" + s.getEndTime().get(Calendar.MINUTE),row+1,col);		
+			tableModel.setValueAt("" + s.getEndTime().get(Calendar.HOUR_OF_DAY) + ":" + s.getEndTime().get(Calendar.MINUTE),row+1,col);
 		}
 	}
 	
@@ -223,6 +259,7 @@ public class EmployeePanel extends JPanel implements ActionListener {
 						time = null;
 			        tableData[row][col] = time;
 			        updateTotal(col);
+			        updateShift(row,col);
 			        fireTableCellUpdated(row, col);
 			        
 				}
@@ -239,6 +276,7 @@ public class EmployeePanel extends JPanel implements ActionListener {
 			int totalMinutes = 0;
 			
 			int currentRow = 0;
+
 			
 			while(currentRow < tableRows-1 && tableData[currentRow][col] != null && tableData[currentRow+1][col] != null)
 			{
@@ -278,6 +316,35 @@ public class EmployeePanel extends JPanel implements ActionListener {
 			System.out.println(""+totalHours+":"+totalMinutes);
 			fireTableCellUpdated(tableRows-1, col);
 			
+			//Update the label for total hours per week as well
+			updateTotalWeekHours();
+			
+		}
+		
+		public void updateTotalWeekHours(){
+			int totalHours = 0; 
+			int totalMinutes = 0;
+			for(int x = 1; x < tableColumns; x++)
+			{
+				if(tableData[tableRows-1][x]!=null)
+				{
+					totalHours += timeToCode(tableData[tableRows-1][x])/100;
+					totalMinutes += timeToCode(tableData[tableRows-1][x])%100;
+				}
+			}
+			
+			//Dealing with an excess of minutes
+			if(totalMinutes > 60)
+			{
+				totalHours = totalHours + totalMinutes / 60;
+				totalMinutes = totalMinutes%60;
+			}
+		
+			if(totalMinutes < 10)
+				totalHoursLabel.setText("Time worked this week: " + totalHours + ":0" + totalMinutes);
+			else
+				totalHoursLabel.setText("Time worked this week: " + totalHours + ":" + totalMinutes);
+			
 		}
 		
 		/**
@@ -310,6 +377,57 @@ public class EmployeePanel extends JPanel implements ActionListener {
 			if(hours < 0 || hours > 23 || minutes < 0 || minutes > 59)
 				return -1;
 			return hours*100+minutes;
+		}
+
+		
+		public Shift getShift(int row, int col){
+			
+			int startHour = 0;
+			int startMinute = 0;
+			int finishHour = 23;
+			int finishMinute = 59;
+			
+			if(row%2 == 0)
+			{
+				startHour = timeToCode(tableData[row][col])/100;
+				startMinute = timeToCode(tableData[row][col])%100;
+				
+				if(tableData[row+1][col] != null)
+				{
+					finishHour = timeToCode(tableData[row+1][col])/100;
+					finishMinute = timeToCode(tableData[row+1][col])%100;
+				}
+				
+			}
+			else
+			{	
+				startHour = timeToCode(tableData[row-1][col])/100;
+				startMinute = timeToCode(tableData[row-1][col])%100;
+				finishHour = timeToCode(tableData[row][col])/100;
+				finishMinute = timeToCode(tableData[row][col])%100;
+			}
+				
+			System.out.println("Starting Time: " +firstDay.get(Calendar.YEAR)+"/"+
+						 +firstDay.get(Calendar.MONTH)+"/"+
+						 +(firstDay.get(Calendar.DAY_OF_MONTH)+col)+" "+
+						 startHour+":"+startMinute);
+			System.out.println("Ending Time: " +firstDay.get(Calendar.YEAR)+"/"+
+						 +firstDay.get(Calendar.MONTH)+"/"+
+						 +(firstDay.get(Calendar.DAY_OF_MONTH)+col)+" "+
+						 finishHour+":"+finishMinute);
+			
+			Vector<Shift> found = currentEmployee.getShiftsBetween(new GregorianCalendar(firstDay.get(Calendar.YEAR),
+																   firstDay.get(Calendar.MONTH),
+																   firstDay.get(Calendar.DAY_OF_MONTH)+col,
+																   startHour, startMinute),
+										     new GregorianCalendar(firstDay.get(Calendar.YEAR),
+																   firstDay.get(Calendar.MONTH),
+																   firstDay.get(Calendar.DAY_OF_MONTH)+col,
+																   finishHour, finishMinute));
+			System.out.println(found.toString());
+			if(found.size() > 0)
+				return found.get(0);
+			return null;
 		}
 		
 		public String validateData(Object value){
@@ -350,5 +468,15 @@ public class EmployeePanel extends JPanel implements ActionListener {
 			return ""+hours+":"+minutes;
 			
 		}
+		
+		
+		public void updateShift(int row, int col){
+			//find the relevant shift
+			//TODO:Finish fixing this function, rework whatever needs to be tweaked, shift some more functionality into employee or timecontroller. Whatever.
+			Shift shift = getShift(row,col);
+			
+		}
 	}
+	
+	
 }
