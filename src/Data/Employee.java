@@ -4,6 +4,8 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.Vector;
 
+import javax.swing.JOptionPane;
+
 /**
  * Employee Class 
  * Keep records for a variable number of employees, containing the following fields
@@ -108,6 +110,34 @@ public class Employee {
 		return null;
 	}
 	
+	/**
+	 * Returns the first shift that 
+	 * @param date
+	 * @return
+	 */
+	public Shift getShiftAt(Calendar date)
+	{
+		if(date == null)
+			return null;
+		if(shifts.size() > 0)
+		{
+			int x = 0;
+			
+			//Get to the first date within the specified date
+			if(currentShift != null && currentShift.getStartTime().before(date) && (currentShift.getEndTime() == null || currentShift.getEndTime().after(date)))
+				return currentShift;
+			
+			while(x < shifts.size())
+			{
+				if(shifts.get(x).getStartTime().before(date) && (shifts.get(x).getEndTime() == null || shifts.get(x).getEndTime().after(date)))
+					return shifts.get(x);
+				else
+					x++;
+			}			
+		}
+		return null;
+	}
+	
 	//"Times in" an employee
 	public boolean timeIn(Calendar in)
 	{
@@ -123,7 +153,7 @@ public class Employee {
 	//"Times out" an employee
 	public boolean timeOut(Calendar out)
 	{
-		if(working)
+		if(working && out.after(currentShift.getStartTime()))
 		{
 			currentShift.setEndTime(out);
 			working = false;
@@ -139,6 +169,7 @@ public class Employee {
 		int x = 0;
 		while(x < shifts.size() && start.after(shifts.get(x).getStartTime()))x++;
 		shifts.add(x, new Shift(start,end));
+		System.out.println("Added new completed shift at position " + x + ": "+shifts.get(x).toString());
 	}
 	
 	
@@ -185,6 +216,42 @@ public class Employee {
 			employed = false;
 	}
 	
+	public boolean reopenShift(Shift shift)
+	{
+		if(!working)
+		{
+			shift.setEndTime(null);
+			working = true;
+			return true;
+		}
+		JOptionPane.showMessageDialog(null,"Error: Please close any other open shifts before re-opening this shift.");
+		return false;
+		
+	}
+	
+	public boolean removeShift(Shift shift)
+	{
+		boolean success = false;
+		if(shift.getEndTime() == null)
+		{
+			working = false;
+			currentShift = null;
+			success = true;
+		}
+		else{
+			for(int x = 0; x < shifts.size(); x++)
+			{
+				Shift temp = shifts.get(x);
+				if(temp == shift)
+				{
+					shifts.remove(x);
+					success = true;
+				}
+			}
+		}
+		return success;	
+	}
+	
 	
 	//Setters&Getters
 	
@@ -215,4 +282,8 @@ public class Employee {
 	public int getAuthLevel(){
 		return authLevel;
 	}	
+	
+	public Shift getCurrentShift(){
+		return currentShift;
+	}
 }

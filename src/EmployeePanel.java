@@ -53,7 +53,7 @@ public class EmployeePanel extends JPanel implements ActionListener {
 		
 		tableModel = new EmployeeTableModel();
 		firstDay = null;
-		startingDay = 3;
+		startingDay = 0;
 			setStartingDay(startingDay);
 		
 		timeInControls = new JPanel();
@@ -106,6 +106,8 @@ public class EmployeePanel extends JPanel implements ActionListener {
 				tableData[y][x] = null;
 	}
 	
+	
+	//TODO: Fix this to load employees depending on the starting day of the week rather than arbitrary column placement
 	public void loadEmployee(Employee e)
 	{
 		clearTableData();
@@ -114,7 +116,8 @@ public class EmployeePanel extends JPanel implements ActionListener {
 		GregorianCalendar from = new GregorianCalendar();
 		if(from.get(Calendar.DAY_OF_WEEK) != startingDay+1)
 			from.add(Calendar.DAY_OF_MONTH, -7 + from.get(Calendar.DAY_OF_WEEK)-1+startingDay);
-		GregorianCalendar to = new GregorianCalendar();
+		GregorianCalendar to = ((GregorianCalendar)from.clone());
+				to.add(Calendar.DAY_OF_MONTH, 6);
 		firstDay = from;
 		
 		for(int c = 0; c < 7; c++)
@@ -134,12 +137,13 @@ public class EmployeePanel extends JPanel implements ActionListener {
 			tableData[r+1][0] = "OUT:";
 		}
 		tableData[tableRows-1][0] = "TOTAL:";
-		
+		System.out.println("Polling for a list of shifts between " + from.get(Calendar.YEAR) + "/"+from.get(Calendar.MONTH)+"/"+from.get(Calendar.DAY_OF_MONTH));
+		System.out.println("and " + to.get(Calendar.YEAR) + "/"+to.get(Calendar.MONTH)+"/"+to.get(Calendar.DAY_OF_MONTH));
 		Vector<Shift> employeeShifts = e.getShiftsBetween(from, to);
 		for(int x = 0; x < employeeShifts.size(); x++)
 		{
 			Shift s = employeeShifts.get(x);
-			System.out.println("Adding new shift: " + s.toString());
+			System.out.println("Adding shift "+x+" to table: " + s.toString());
 			int row = 0;
 			int col = 0;
 			switch(s.getStartTime().get(Calendar.DAY_OF_WEEK)){
@@ -162,8 +166,8 @@ public class EmployeePanel extends JPanel implements ActionListener {
 			{
 				row++;
 			}
-			tableModel.setValueAt("" + s.getStartTime().get(Calendar.HOUR_OF_DAY) + ":" + s.getStartTime().get(Calendar.MINUTE),row,col);
-			tableModel.setValueAt("" + s.getEndTime().get(Calendar.HOUR_OF_DAY) + ":" + s.getEndTime().get(Calendar.MINUTE),row+1,col);
+			tableModel.writeValueAt("" + s.getStartTime().get(Calendar.HOUR_OF_DAY) + ":" + s.getStartTime().get(Calendar.MINUTE),row,col);
+			tableModel.writeValueAt("" + s.getEndTime().get(Calendar.HOUR_OF_DAY) + ":" + s.getEndTime().get(Calendar.MINUTE),row+1,col);
 		}
 	}
 	
@@ -220,7 +224,93 @@ public class EmployeePanel extends JPanel implements ActionListener {
 	        return false;
 	    }
 		
+		/**
+		 * Less safe version of setValueAt, this is for read-only operations such as loading information from the employee's shift data for initial display
+		 * @param value The value to be displayed
+		 * @param row	The row index that the value will be written to
+		 * @param col	the column index that the value will be written to
+		 */
+		public void writeValueAt(Object value, int row, int col){
+			tableData[row][col] = validateData(value);
+			updateTotal(col);
+			fireTableCellUpdated(row, col);
+		}
+		
+		/**
+		 * More safe version of writeValueAt, this function is used to validate and apply changes made to the table and employee shifts through user input
+		 * @param value The value to be displayed
+		 * @param row	The row index that the value will be written to
+		 * @param col	the column index that the value will be written to
+		 */
 		public void setValueAt(Object value, int row, int col) {
+						
+			String time = validateData(value);
+			Calendar date = null;
+				if(time != null)
+					date = codeToCalendar(time, col);
+			
+			boolean success = false;
+			
+			//Additive Changes
+			if(date != null)
+			{
+				Shift currentShift = currentEmployee.getShiftAt(date);
+				//If the employee is timing in to a new shift
+				if(currentShift == null && tableData[row][col] == null && row%2 == 0)
+				{
+					success = currentEmployee.timeIn(date);
+				}
+				
+				//If they are changing the start time of a shift
+				else if(currentShift != null && tableData[row][col] != null && row%2 == 0)
+				{
+					success = currentShift.setStartTime(date);
+				}
+				
+				//If they are ending a shift
+				else if(currentShift != null && tableData[row][col] == null && row%2 == 1)
+				{
+					success = currentEmployee.timeOut(date);
+				}
+				
+				//If they are changing the end time of a shift
+				else if(currentShift != null && tableData[row][col] != null && row%2 == 1)
+				{
+					success = currentShift.setEndTime(date);				
+				}
+			}
+			//If date is null, we are re-opening a shift or deleting a shift entirely
+			else
+			{
+				Shift currentShift = getShift(row, col);
+				//Reopen a shift, accidental time out
+				if(row%2 == 1)
+				{
+					success = currentEmployee.reopenShift(currentShift);
+				}
+				//Delete a shift
+				else if(row%2 == 0)
+				{
+					success = currentEmployee.removeShift(currentShift);
+				}
+			}
+			
+			//If things check out in the employee class, we're good to make the relevant changes to the table
+			
+			if(success)
+			{
+				tableData[row][col] = time;
+				updateTotal(col);
+				fireTableCellUpdated(row, col);
+			}
+			
+			
+			
+			
+			
+			//Moving most of the below to the Employee Class for more proper encapsulation
+			
+			/*
 			//Short Circuiting for when the user mistakenly edits a cell and clears it or does not enter anything
 			if(value == null && tableData[row][col] == null) 
 				return;
@@ -258,12 +348,13 @@ public class EmployeePanel extends JPanel implements ActionListener {
 					if(time == "")
 						time = null;
 			        tableData[row][col] = time;
-			        updateTotal(col);
+			        
 			        updateShift(row,col);
-			        fireTableCellUpdated(row, col);
+			        
 			        
 				}
 			}
+			*/
 	    }
 		
 		/**
@@ -313,7 +404,6 @@ public class EmployeePanel extends JPanel implements ActionListener {
 			else
 				tableData[tableRows-1][col] = ""+totalHours+":"+totalMinutes;
 			
-			System.out.println(""+totalHours+":"+totalMinutes);
 			fireTableCellUpdated(tableRows-1, col);
 			
 			//Update the label for total hours per week as well
@@ -378,7 +468,26 @@ public class EmployeePanel extends JPanel implements ActionListener {
 				return -1;
 			return hours*100+minutes;
 		}
-
+		
+		public Calendar cellToCalendar(int row, int col){
+			int hour = timeToCode(tableData[row][col])/100;
+			int minute = timeToCode(tableData[row][col])%100;
+			
+			return new GregorianCalendar(firstDay.get(Calendar.YEAR),
+					   firstDay.get(Calendar.MONTH),
+					   firstDay.get(Calendar.DAY_OF_MONTH)+col,
+					   hour, minute);
+		}
+		
+		public Calendar codeToCalendar(String code, int dayOfWeek){
+			int hour = timeToCode(code)/100;
+			int minute = timeToCode(code)%100;
+			
+			return new GregorianCalendar(firstDay.get(Calendar.YEAR),
+					   firstDay.get(Calendar.MONTH),
+					   firstDay.get(Calendar.DAY_OF_MONTH)+dayOfWeek,
+					   hour, minute);
+		}
 		
 		public Shift getShift(int row, int col){
 			
@@ -406,15 +515,6 @@ public class EmployeePanel extends JPanel implements ActionListener {
 				finishHour = timeToCode(tableData[row][col])/100;
 				finishMinute = timeToCode(tableData[row][col])%100;
 			}
-				
-			System.out.println("Starting Time: " +firstDay.get(Calendar.YEAR)+"/"+
-						 +firstDay.get(Calendar.MONTH)+"/"+
-						 +(firstDay.get(Calendar.DAY_OF_MONTH)+col)+" "+
-						 startHour+":"+startMinute);
-			System.out.println("Ending Time: " +firstDay.get(Calendar.YEAR)+"/"+
-						 +firstDay.get(Calendar.MONTH)+"/"+
-						 +(firstDay.get(Calendar.DAY_OF_MONTH)+col)+" "+
-						 finishHour+":"+finishMinute);
 			
 			Vector<Shift> found = currentEmployee.getShiftsBetween(new GregorianCalendar(firstDay.get(Calendar.YEAR),
 																   firstDay.get(Calendar.MONTH),
@@ -424,7 +524,6 @@ public class EmployeePanel extends JPanel implements ActionListener {
 																   firstDay.get(Calendar.MONTH),
 																   firstDay.get(Calendar.DAY_OF_MONTH)+col,
 																   finishHour, finishMinute));
-			System.out.println(found.toString());
 			if(found.size() > 0)
 				return found.get(0);
 			return null;
@@ -447,7 +546,7 @@ public class EmployeePanel extends JPanel implements ActionListener {
 				String temp = value.toString().replaceAll("[A-Za-z]*","").trim();
 				
 				hours = Integer.parseInt(temp.substring(0,temp.indexOf(':')));
-				if(afternoon && hours <= 12)
+				if(afternoon && hours <= 11)
 					hours = hours + 12;
 				minutes = Integer.parseInt(temp.substring(temp.indexOf(':')+1,temp.length()));
 			}
@@ -474,7 +573,7 @@ public class EmployeePanel extends JPanel implements ActionListener {
 			//find the relevant shift
 			//TODO:Finish fixing this function, rework whatever needs to be tweaked, shift some more functionality into employee or timecontroller. Whatever.
 			Shift shift = getShift(row,col);
-			
+			//if(shift.getStartTime().before())
 		}
 	}
 	
